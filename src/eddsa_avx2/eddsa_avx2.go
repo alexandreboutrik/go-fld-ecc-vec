@@ -13,6 +13,7 @@ import (
 
 #include "faz_eddsa_avx2.h"
 
+#include <stdlib.h>
 #include <stdint.h>
 
 extern void randEd25519_Key(argEdDSA_PrivateKey key);
@@ -64,6 +65,7 @@ func Keygen() (pub *PublicKey, priv *PrivateKey, err error) {
 
 func Sign(message []byte, pub *PublicKey, priv *PrivateKey) (signature []byte, err error) {
 	sm := C.CString(strings.Repeat("0", C.ED25519_SIG_SIZE_BYTES_PARAM))
+	defer C.free(unsafe.Pointer(sm))
 
 	ret := C.ed25519_sign(
 		(*C.uint8_t)(unsafe.Pointer(sm)),
@@ -82,6 +84,7 @@ func Sign(message []byte, pub *PublicKey, priv *PrivateKey) (signature []byte, e
 
 func Verify(message []byte, pub *PublicKey, signature []byte) (valid bool) {
 	sm := C.CString(string(signature))
+	defer C.free(unsafe.Pointer(sm))
 
 	ret := C.ed25519_verify(
 		(*C.uint8_t)(unsafe.Pointer(&message[0])),
