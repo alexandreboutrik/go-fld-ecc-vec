@@ -55,8 +55,6 @@ func Keygen() (pub *PublicKey, priv *PrivateKey, err error) {
 		return nil, nil, errors.New("Keygen failed.")
 	}
 
-	Printkey(sk)
-
 	public_key = &PublicKey{CPublicKey: pk}
 	private_key = &PrivateKey{CSecretKey: sk}
 
