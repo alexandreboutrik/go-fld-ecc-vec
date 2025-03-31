@@ -1,7 +1,7 @@
 package main
 
 import (
-	"eddsa_avx2-go/eddsa_avx2"
+	"github.com/PQC-Group-UTFPR/go-fld-ecc-vec"
 )
 
 import (
