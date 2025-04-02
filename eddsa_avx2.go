@@ -10,7 +10,7 @@ import (
 
 #cgo LDFLAGS: -L/usr/local/lib
 #cgo LDFLAGS: -L ${SRCDIR}/build
-#cgo LDFLAGS: -l:libfaz_ecc_avx2.so
+#cgo LDFLAGS: -l:libfaz_ecc_avx2.a
 
 #include "faz_eddsa_avx2.h"
 
