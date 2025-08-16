@@ -3,6 +3,8 @@ package eddsa_avx2
 import (
 	"unsafe"
 	"errors"
+	"fmt"
+	"runtime"
 	"strings"
 )
 
@@ -45,6 +47,41 @@ func randkey(sk *C.uint8_t) {
 	C.randEd25519_Key(sk)
 }
 
+func PublicKeyFromBytes(data []byte) (*PublicKey, error) {
+	if len(data) != C.ED25519_KEY_SIZE_BYTES_PARAM {
+		return nil, fmt.Errorf("eddsa_avx: invalid key size")
+	}
+
+	cPubKeyPtr := C.CBytes(data)
+	if cPubKeyPtr == nil {
+		return nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
+	}
+
+	publicKey := &PublicKey{CPublicKey: (*C.uchar)(cPubKeyPtr)}
+
+	runtime.SetFinalizer(publicKey, func(pk *PublicKey) {
+		C.free(unsafe.Pointer(pk.CPublicKey))
+	})
+
+	return publicKey, nil
+}
+
+func (pub *PublicKey) Bytes() []byte {
+	if pub.CPublicKey == nil {
+		return nil
+	}
+
+	return C.GoBytes(unsafe.Pointer(pub.CPublicKey), C.int(C.ED25519_KEY_SIZE_BYTES_PARAM))
+}
+
+func (priv *PrivateKey) Bytes() []byte {
+	if priv.CSecretKey == nil {
+		return nil
+	}
+
+	return C.GoBytes(unsafe.Pointer(priv.CSecretKey), C.int(C.ED25519_KEY_SIZE_BYTES_PARAM))
+}
+
 func Keygen() (pub *PublicKey, priv *PrivateKey, err error) {
 	pk := (*C.uint8_t)(unsafe.Pointer(C.CString(strings.Repeat("0", C.ED25519_KEY_SIZE_BYTES_PARAM))))
 	sk := (*C.uint8_t)(unsafe.Pointer(C.CString(strings.Repeat("0", C.ED25519_KEY_SIZE_BYTES_PARAM))))
@@ -53,7 +90,7 @@ func Keygen() (pub *PublicKey, priv *PrivateKey, err error) {
 
 	ret := C.ed25519_keygen(pk, sk)
 	if ret != C.EDDSA_KEYGEN_OK {
-		return nil, nil, errors.New("Keygen failed.")
+		return nil, nil, errors.New("eddsa_avx: Keygen failed.")
 	}
 
 	public_key = &PublicKey{CPublicKey: pk}
@@ -73,7 +110,7 @@ func Sign(message []byte, pub *PublicKey, priv *PrivateKey) (signature []byte, e
 		(*C.uint8_t)(unsafe.Pointer(pub.CPublicKey)),
 		(*C.uint8_t)(unsafe.Pointer(priv.CSecretKey)))
 	if ret != C.EDDSA_SIGNATURE_OK {
-		return nil, errors.New("Sign failed.")
+		return nil, errors.New("eddsa_avx: Sign failed.")
 	}
 
 	signature = C.GoBytes((unsafe.Pointer(sm)), (C.int)(C.ED25519_SIG_SIZE_BYTES_PARAM))
