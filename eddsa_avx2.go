@@ -1,11 +1,12 @@
 package eddsa_avx2
 
 import (
+	"crypto"
 	"unsafe"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
-	"strings"
 )
 
 /*
@@ -32,16 +33,17 @@ extern void printEd25519_Signature(FILE * file,uint8_t *sig);
 */
 import "C"
 
+var ED25519_KEY_SIZE_BYTES_PARAM int = C.ED25519_KEY_SIZE_BYTES_PARAM
+var ED25519_SIG_SIZE_BYTES_PARAM int = C.ED25519_SIG_SIZE_BYTES_PARAM
+
 type PublicKey struct {
-	CPublicKey *C.uint8_t
+	cPublicKey *C.uint8_t
 }
 
 type PrivateKey struct {
-	CSecretKey *C.uint8_t
+	cSecretKey *C.uint8_t
+	publicKey *PublicKey
 }
-
-var public_key *PublicKey
-var private_key *PrivateKey
 
 func randkey(sk *C.uint8_t) {
 	C.randEd25519_Key(sk)
@@ -57,77 +59,131 @@ func PublicKeyFromBytes(data []byte) (*PublicKey, error) {
 		return nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
 	}
 
-	publicKey := &PublicKey{CPublicKey: (*C.uchar)(cPubKeyPtr)}
+	publicKey := &PublicKey{cPublicKey: (*C.uchar)(cPubKeyPtr)}
 
 	runtime.SetFinalizer(publicKey, func(pk *PublicKey) {
-		C.free(unsafe.Pointer(pk.CPublicKey))
+		C.free(unsafe.Pointer(pk.cPublicKey))
 	})
 
 	return publicKey, nil
 }
 
+func PrivateKeyFromBytes(data []byte) (*PrivateKey, error) {
+	if len(data) != C.ED25519_KEY_SIZE_BYTES_PARAM {
+		return nil, fmt.Errorf("eddsa_avx: invalid key size")
+	}
+
+	cSecKeyPtr := C.CBytes(data)
+	if cSecKeyPtr == nil {
+		return nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
+	}
+
+	priv := &PrivateKey{cSecretKey: (*C.uchar)(cSecKeyPtr)}
+
+	runtime.SetFinalizer(priv, func(pk *PrivateKey) {
+		C.free(unsafe.Pointer(pk.cSecretKey))
+	})
+
+	return priv, nil
+}
+
+
+
 func (pub *PublicKey) Bytes() []byte {
-	if pub.CPublicKey == nil {
+	if pub.cPublicKey == nil {
 		return nil
 	}
 
-	return C.GoBytes(unsafe.Pointer(pub.CPublicKey), C.int(C.ED25519_KEY_SIZE_BYTES_PARAM))
+	return C.GoBytes(unsafe.Pointer(pub.cPublicKey), C.int(C.ED25519_KEY_SIZE_BYTES_PARAM))
 }
 
 func (priv *PrivateKey) Bytes() []byte {
-	if priv.CSecretKey == nil {
+	if priv.cSecretKey == nil {
 		return nil
 	}
 
-	return C.GoBytes(unsafe.Pointer(priv.CSecretKey), C.int(C.ED25519_KEY_SIZE_BYTES_PARAM))
+	return C.GoBytes(unsafe.Pointer(priv.cSecretKey), C.int(C.ED25519_KEY_SIZE_BYTES_PARAM))
+}
+
+func (priv *PrivateKey) Public() crypto.PublicKey {
+	return priv.publicKey
 }
 
 func Keygen() (pub *PublicKey, priv *PrivateKey, err error) {
-	pk := (*C.uint8_t)(unsafe.Pointer(C.CString(strings.Repeat("0", C.ED25519_KEY_SIZE_BYTES_PARAM))))
-	sk := (*C.uint8_t)(unsafe.Pointer(C.CString(strings.Repeat("0", C.ED25519_KEY_SIZE_BYTES_PARAM))))
+	pkc := (*C.uint8_t)(C.malloc(C.ED25519_KEY_SIZE_BYTES_PARAM))
+	skc := (*C.uint8_t)(C.malloc(C.ED25519_KEY_SIZE_BYTES_PARAM))
 
-	randkey(sk)
+	if pkc == nil || skc == nil {
+		return nil, nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
+	}
 
-	ret := C.ed25519_keygen(pk, sk)
-	if ret != C.EDDSA_KEYGEN_OK {
+	randkey(skc)
+
+	if C.ed25519_keygen(pkc, skc) != C.EDDSA_KEYGEN_OK {
+		C.free(unsafe.Pointer(pkc))
+		C.free(unsafe.Pointer(skc))
 		return nil, nil, errors.New("eddsa_avx: Keygen failed.")
 	}
 
-	public_key = &PublicKey{CPublicKey: pk}
-	private_key = &PrivateKey{CSecretKey: sk}
+	pub = &PublicKey{cPublicKey: pkc}
+	priv = &PrivateKey{cSecretKey: skc, publicKey: pub}
 
-	return public_key, private_key, nil
+	runtime.SetFinalizer(pub, func(p *PublicKey) {
+		C.free(unsafe.Pointer(p.cPublicKey))
+	})
+	runtime.SetFinalizer(priv, func(p *PrivateKey) {
+		C.free(unsafe.Pointer(p.cSecretKey))
+	})
+
+	return pub, priv, nil
 }
 
-func Sign(message []byte, pub *PublicKey, priv *PrivateKey) (signature []byte, err error) {
-	sm := C.CString(strings.Repeat("0", C.ED25519_SIG_SIZE_BYTES_PARAM))
-	defer C.free(unsafe.Pointer(sm))
+func (priv *PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+	if priv.publicKey == nil || priv.publicKey.cPublicKey == nil {
+		return nil, errors.New("eddsa_avx: public key is missing, cannot sign")
+	}
+
+	if len(digest) == 0 {
+		return nil, errors.New("eddsa_avx: message digest cannot be empty")
+	}
+
+	sig_c := C.malloc(C.ED25519_SIG_SIZE_BYTES_PARAM)
+	if sig_c == nil {
+		return nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
+	}
+	defer C.free(sig_c)
+
+	msg_c := (*C.uint8_t)(unsafe.Pointer(&digest[0]))
 
 	ret := C.ed25519_sign(
-		(*C.uint8_t)(unsafe.Pointer(sm)),
-		(*C.uint8_t)(unsafe.Pointer(&message[0])),
-		(C.uint64_t)(len(message)),
-		(*C.uint8_t)(unsafe.Pointer(pub.CPublicKey)),
-		(*C.uint8_t)(unsafe.Pointer(priv.CSecretKey)))
+		(*C.uint8_t)(sig_c),
+		msg_c,
+		(C.uint64_t)(len(digest)),
+		priv.publicKey.cPublicKey,
+		priv.cSecretKey)
+
 	if ret != C.EDDSA_SIGNATURE_OK {
 		return nil, errors.New("eddsa_avx: Sign failed.")
 	}
 
-	signature = C.GoBytes((unsafe.Pointer(sm)), (C.int)(C.ED25519_SIG_SIZE_BYTES_PARAM))
-
-	return signature, nil
+	return C.GoBytes(sig_c, C.int(C.ED25519_SIG_SIZE_BYTES_PARAM)), nil
 }
 
-func Verify(message []byte, pub *PublicKey, signature []byte) (valid bool) {
-	sm := C.CString(string(signature))
-	defer C.free(unsafe.Pointer(sm))
+func (pub *PublicKey) Verify(message []byte, signature []byte) (valid bool) {
+	if len(signature) != C.ED25519_SIG_SIZE_BYTES_PARAM || len(message) == 0 {
+		return false
+	}
+
+	msg_c := (*C.uint8_t)(unsafe.Pointer(&message[0]))
+	sig_c := (*C.uint8_t)(unsafe.Pointer(&signature[0]))
 
 	ret := C.ed25519_verify(
-		(*C.uint8_t)(unsafe.Pointer(&message[0])),
+		msg_c,
 		(C.uint64_t)(len(message)),
-		(*C.uint8_t)(unsafe.Pointer(pub.CPublicKey)),
-		(*C.uint8_t)(unsafe.Pointer(sm)))
-	return (ret == C.EDDSA_VERIFICATION_OK)
+		pub.cPublicKey,
+		sig_c)
+
+	return ret == C.EDDSA_VERIFICATION_OK
 }
 
 func Printkey(key interface{}) {
