@@ -78,10 +78,26 @@ func PrivateKeyFromBytes(data []byte) (*PrivateKey, error) {
 		return nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
 	}
 
-	priv := &PrivateKey{cSecretKey: (*C.uchar)(cSecKeyPtr)}
+	cPubKeyPtr := C.malloc(C.ED25519_KEY_SIZE_BYTES_PARAM)
+	if cPubKeyPtr == nil {
+		C.free(cSecKeyPtr)
+		return nil, fmt.Errorf("eddsa_avx: failed to allocate memory")
+	}
+
+	if C.ed25519_keygen((*C.uint8_t)(cPubKeyPtr), (*C.uint8_t)(cSecKeyPtr)) != C.EDDSA_KEYGEN_OK {
+		C.free(cSecKeyPtr)
+		C.free(cPubKeyPtr)
+		return nil, errors.New("eddsa_avx: keygen() failed")
+	}
+
+	pub := &PublicKey{cPublicKey: (*C.uchar)(cPubKeyPtr)}
+	priv := &PrivateKey{cSecretKey: (*C.uchar)(cSecKeyPtr), publicKey: pub}
 
 	runtime.SetFinalizer(priv, func(pk *PrivateKey) {
 		C.free(unsafe.Pointer(pk.cSecretKey))
+	})
+	runtime.SetFinalizer(pub, func(pk *PublicKey) {
+		C.free(unsafe.Pointer(pk.cPublicKey))
 	})
 
 	return priv, nil

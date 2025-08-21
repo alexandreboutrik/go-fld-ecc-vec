@@ -95,3 +95,21 @@ func TestKeySerialization(t *testing.T) {
 		t.Fatalf("deserialized private key does not match the original")
 	}
 }
+
+func TestPrivateKeyFromBytesPublicKeyReconstruction(t *testing.T) {
+	pub, priv, err := Keygen()
+	if err != nil {
+		t.Fatalf("Keygen() failed: %v", err)
+	}
+
+	privBytes := priv.Bytes()
+
+	priv2, err := PrivateKeyFromBytes(privBytes)
+	if err != nil {
+		t.Fatalf("PrivateKeyFromBytes() failed: %v", err)
+	}
+
+	if !bytes.Equal(pub.Bytes(), priv2.Public().(*PublicKey).Bytes()) {
+		t.Fatalf("reconstructed public key does not match the original public key")
+	}
+}
