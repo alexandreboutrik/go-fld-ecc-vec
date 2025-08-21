@@ -1,0 +1,22 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          go test -v . ||
+          { echo "Failed to run the tests. Exiting." ; exit 1 ;}
+          echo "Tests completed."
