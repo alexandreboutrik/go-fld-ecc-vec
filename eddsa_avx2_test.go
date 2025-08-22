@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestKeyGeneration(t *testing.T) {
+func Test_Key_Generation(t *testing.T) {
 	pub, priv, err := Keygen()
 	if err != nil {
 		t.Fatalf("Keygen() failed: %v", err)
@@ -20,7 +20,7 @@ func TestKeyGeneration(t *testing.T) {
 	}
 }
 
-func TestValidSignature(t *testing.T) {
+func Test_Valid_Signature(t *testing.T) {
 	pub, priv, err := Keygen()
 	if err != nil {
 		t.Fatalf("Keygen() failed: %v", err)
@@ -43,7 +43,7 @@ func TestValidSignature(t *testing.T) {
 	}
 }
 
-func TestInvalidSignature(t *testing.T) {
+func Test_Invalid_Signature(t *testing.T) {
 	pub, priv, err := Keygen()
 	if err != nil {
 		t.Fatalf("Keygen() failed: %v", err)
@@ -68,7 +68,7 @@ func TestInvalidSignature(t *testing.T) {
 	}
 }
 
-func TestKeySerialization(t *testing.T) {
+func Test_Key_Serialization(t *testing.T) {
 	pubOrig, privOrig, err := Keygen()
 	if err != nil {
 		t.Fatalf("Keygen() failed: %v", err)
@@ -96,7 +96,7 @@ func TestKeySerialization(t *testing.T) {
 	}
 }
 
-func TestPrivateKeyFromBytesPublicKeyReconstruction(t *testing.T) {
+func Test_PrivateKeyFromBytes_PublicKey_Reconstruction(t *testing.T) {
 	pub, priv, err := Keygen()
 	if err != nil {
 		t.Fatalf("Keygen() failed: %v", err)
@@ -111,5 +111,28 @@ func TestPrivateKeyFromBytesPublicKeyReconstruction(t *testing.T) {
 
 	if !bytes.Equal(pub.Bytes(), priv2.Public().(*PublicKey).Bytes()) {
 		t.Fatalf("reconstructed public key does not match the original public key")
+	}
+}
+
+func Test_Verify_With_Wrong_Digest(t *testing.T) {
+	pub, priv, err := Keygen()
+	if err != nil {
+		t.Fatalf("Keygen() failed: %v", err)
+	}
+
+	originalMessage := []byte("this is a test message")
+	wrongDigest := []byte("this is a different message")
+
+	signature, err := priv.Sign(nil, originalMessage, nil)
+	if err != nil {
+		t.Fatalf("Sign() failed: %v", err)
+	}	
+	if len(signature) != ED25519_SIG_SIZE_BYTES_PARAM {
+		t.Fatalf("Sign() returned signature of incorrect length: got %d, expected %d", len(signature), ED25519_SIG_SIZE_BYTES_PARAM)
+	}
+
+	valid := pub.Verify(wrongDigest, signature)
+	if valid {
+		t.Fatalf("Verify() succeeded for a valid signature but wrong digest")
 	}
 }
